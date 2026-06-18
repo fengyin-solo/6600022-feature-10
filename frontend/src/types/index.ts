@@ -7,12 +7,28 @@ export interface Move {
   timestamp: number;
 }
 
+export interface Position {
+  row: number;
+  col: number;
+}
+
+export type KeyMoveType = 'winning' | 'live-four' | 'live-three' | 'block';
+
+export interface KeyMove {
+  move: Move;
+  moveNumber: number;
+  type: KeyMoveType;
+  description: string;
+}
+
 export interface GameRecord {
   id: string;
   moves: Move[];
   winner: number | null; // 0=draw, 1=black, 2=white, null=ongoing
   createdAt: string;
   duration: number;
+  winningLine: Position[] | null;
+  keyMoves: KeyMove[];
 }
 
 export interface AIConfig {

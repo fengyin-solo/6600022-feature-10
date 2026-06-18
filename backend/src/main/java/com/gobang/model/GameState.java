@@ -22,6 +22,8 @@ public class GameState {
     private List<Move> moves;
     private Integer winner; // null=ongoing, 0=draw, 1=black, 2=white
     private String createdAt;
+    private List<Position> winningLine;
+    private List<KeyMove> keyMoves;
 
     public GameState(String id) {
         this.id = id;
@@ -30,6 +32,8 @@ public class GameState {
         this.moves = new ArrayList<>();
         this.winner = null;
         this.createdAt = java.time.LocalDateTime.now().toString();
+        this.winningLine = null;
+        this.keyMoves = new ArrayList<>();
     }
 
     @Data
@@ -42,31 +46,61 @@ public class GameState {
         private long timestamp;
     }
 
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class Position {
+        private int row;
+        private int col;
+    }
+
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class KeyMove {
+        private Move move;
+        private int moveNumber;
+        private String type;
+        private String description;
+    }
+
     public boolean placeStone(int row, int col) {
         if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return false;
         if (board[row][col] != EMPTY) return false;
         board[row][col] = currentPlayer;
         moves.add(new Move(row, col, currentPlayer, System.currentTimeMillis()));
 
-        if (checkWin(row, col, currentPlayer)) {
+        List<Position> winLine = findWinningLine(row, col, currentPlayer);
+        if (winLine != null) {
             winner = currentPlayer;
+            winningLine = winLine;
         } else if (moves.size() == BOARD_SIZE * BOARD_SIZE) {
             winner = 0;
+            winningLine = null;
         } else {
             currentPlayer = currentPlayer == BLACK ? WHITE : BLACK;
         }
         return true;
     }
 
-    private boolean checkWin(int row, int col, int player) {
+    private List<Position> findWinningLine(int row, int col, int player) {
         int[][] directions = {{0, 1}, {1, 0}, {1, 1}, {1, -1}};
         for (int[] dir : directions) {
-            int count = 1;
-            count += countDir(row, col, dir[0], dir[1], player);
-            count += countDir(row, col, -dir[0], -dir[1], player);
-            if (count >= 5) return true;
+            int countFwd = countDir(row, col, dir[0], dir[1], player);
+            int countBwd = countDir(row, col, -dir[0], -dir[1], player);
+            if (1 + countFwd + countBwd >= 5) {
+                List<Position> line = new ArrayList<>();
+                for (int i = -countBwd; i <= countFwd; i++) {
+                    line.add(new Position(row + dir[0] * i, col + dir[1] * i));
+                }
+                return line;
+            }
         }
-        return false;
+        return null;
+    }
+
+    private boolean checkWin(int row, int col, int player) {
+        return findWinningLine(row, col, player) != null;
     }
 
     private int countDir(int row, int col, int dr, int dc, int player) {

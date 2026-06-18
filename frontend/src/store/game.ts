@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { BoardState, Move, GameRecord, AIConfig, GameStatus } from '../types';
+import type { BoardState, Move, GameRecord, AIConfig, GameStatus, Position, KeyMove, KeyMoveType } from '../types';
 
 const BOARD_SIZE = 15;
 const EMPTY = 0;
@@ -117,12 +117,127 @@ function getCandidateMoves(board: BoardState): [number, number][] {
   return candidates;
 }
 
-function checkWinAt(board: BoardState, row: number, col: number, player: number): boolean {
+function findWinningLine(board: BoardState, row: number, col: number, player: number): Position[] | null {
   for (const [dr, dc] of DIRECTIONS) {
-    const count = 1 + countDirection(board, row, col, dr, dc, player) + countDirection(board, row, col, -dr, -dc, player);
-    if (count >= 5) return true;
+    const countFwd = countDirection(board, row, col, dr, dc, player);
+    const countBwd = countDirection(board, row, col, -dr, -dc, player);
+    if (1 + countFwd + countBwd >= 5) {
+      const line: Position[] = [];
+      for (let i = -countBwd; i <= countFwd; i++) {
+        line.push({ row: row + dr * i, col: col + dc * i });
+      }
+      return line;
+    }
   }
-  return false;
+  return null;
+}
+
+function checkWinAt(board: BoardState, row: number, col: number, player: number): boolean {
+  return findWinningLine(board, row, col, player) !== null;
+}
+
+function getLinePattern(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): { count: number; openEnds: number } {
+  const countFwd = countDirection(board, row, col, dr, dc, player);
+  const countBwd = countDirection(board, row, col, -dr, -dc, player);
+  const count = 1 + countFwd + countBwd;
+
+  const fwdR = row + dr * (countFwd + 1);
+  const fwdC = col + dc * (countFwd + 1);
+  const bwdR = row - dr * (countBwd + 1);
+  const bwdC = col - dc * (countBwd + 1);
+
+  const fwdOpen = fwdR >= 0 && fwdR < BOARD_SIZE && fwdC >= 0 && fwdC < BOARD_SIZE && board[fwdR][fwdC] === EMPTY;
+  const bwdOpen = bwdR >= 0 && bwdR < BOARD_SIZE && bwdC >= 0 && bwdC < BOARD_SIZE && board[bwdR][bwdC] === EMPTY;
+
+  return { count, openEnds: (fwdOpen ? 1 : 0) + (bwdOpen ? 1 : 0) };
+}
+
+function identifyKeyMoves(moves: Move[], winner: number | null): KeyMove[] {
+  const keyMoves: KeyMove[] = [];
+  const board: BoardState = createEmptyBoard();
+  const opponentMap: Record<number, number> = { [BLACK]: WHITE, [WHITE]: BLACK };
+
+  for (let i = 0; i < moves.length; i++) {
+    const move = moves[i];
+    board[move.row][move.col] = move.player;
+    const moveNumber = i + 1;
+
+    if (winner !== null && winner !== 0 && i === moves.length - 1) {
+      keyMoves.push({
+        move,
+        moveNumber,
+        type: 'winning',
+        description: `${move.player === BLACK ? '黑棋' : '白棋'}第 ${moveNumber} 手落子获胜，形成五连珠`,
+      });
+      continue;
+    }
+
+    for (const [dr, dc] of DIRECTIONS) {
+      const { count, openEnds } = getLinePattern(board, move.row, move.col, dr, dc, move.player);
+      if (count === 4 && openEnds >= 1) {
+        keyMoves.push({
+          move,
+          moveNumber,
+          type: 'live-four',
+          description: `${move.player === BLACK ? '黑棋' : '白棋'}第 ${moveNumber} 手形成${openEnds === 2 ? '活四' : '冲四'}`,
+        });
+        break;
+      }
+    }
+
+    if (i > 0) {
+      const prevMove = moves[i - 1];
+      const opponent = opponentMap[move.player];
+      for (const [dr, dc] of DIRECTIONS) {
+        const { count, openEnds } = getLinePattern(board, prevMove.row, prevMove.col, dr, dc, opponent);
+        if (count >= 3 && openEnds >= 1) {
+          let wasThreat = false;
+          const testBoard = board.map(r => [...r]);
+          testBoard[move.row][move.col] = EMPTY;
+          for (const [dr2, dc2] of DIRECTIONS) {
+            const prevPattern = getLinePattern(testBoard, prevMove.row, prevMove.col, dr2, dc2, opponent);
+            if (prevPattern.count >= 3 && prevPattern.openEnds >= 1) {
+              wasThreat = true;
+              break;
+            }
+          }
+          if (wasThreat) {
+            const alreadyHasBlock = keyMoves.some(km => km.moveNumber === moveNumber && km.type === 'block');
+            if (!alreadyHasBlock) {
+              keyMoves.push({
+                move,
+                moveNumber,
+                type: 'block',
+                description: `${move.player === BLACK ? '黑棋' : '白棋'}第 ${moveNumber} 手化解对方${count === 4 ? '四' : '三'}的威胁`,
+              });
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    const hasLiveFour = keyMoves.some(km => km.moveNumber === moveNumber && km.type === 'live-four');
+    if (!hasLiveFour) {
+      for (const [dr, dc] of DIRECTIONS) {
+        const { count, openEnds } = getLinePattern(board, move.row, move.col, dr, dc, move.player);
+        if (count === 3 && openEnds === 2) {
+          const alreadyHasLiveThree = keyMoves.some(km => km.moveNumber === moveNumber && km.type === 'live-three');
+          if (!alreadyHasLiveThree) {
+            keyMoves.push({
+              move,
+              moveNumber,
+              type: 'live-three',
+              description: `${move.player === BLACK ? '黑棋' : '白棋'}第 ${moveNumber} 手形成活三`,
+            });
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return keyMoves;
 }
 
 function minimax(board: BoardState, depth: number, alpha: number, beta: number, isMaximizing: boolean, aiPlayer: number): number {
@@ -200,6 +315,8 @@ export const useGameStore = defineStore('game', () => {
   const gameRecords = ref<GameRecord[]>([]);
   const aiConfig = ref<AIConfig>({ depth: 3, enabled: true, playerColor: WHITE });
   const isAiThinking = ref(false);
+  const winningLine = ref<Position[] | null>(null);
+  const keyMoves = ref<KeyMove[]>([]);
 
   // Replay
   const replayMoves = ref<Move[]>([]);
@@ -207,6 +324,8 @@ export const useGameStore = defineStore('game', () => {
   const replayBoard = ref<BoardState>(createEmptyBoard());
   const isReplayPlaying = ref(false);
   const replaySpeed = ref(1000);
+  const replayWinningLine = ref<Position[] | null>(null);
+  const replayKeyMoves = ref<KeyMove[]>([]);
 
   const currentMoveCount = computed(() => moves.value.length);
   const isGameOver = computed(() => status.value === 'finished');
@@ -218,6 +337,8 @@ export const useGameStore = defineStore('game', () => {
     status.value = 'playing';
     winner.value = null;
     isAiThinking.value = false;
+    winningLine.value = null;
+    keyMoves.value = [];
   }
 
   function placeStone(row: number, col: number): boolean {
@@ -229,8 +350,11 @@ export const useGameStore = defineStore('game', () => {
     const move: Move = { row, col, player: currentPlayer.value, timestamp: Date.now() };
     moves.value.push(move);
 
-    if (checkWinAt(board.value, row, col, currentPlayer.value)) {
+    const winLine = findWinningLine(board.value, row, col, currentPlayer.value);
+    if (winLine) {
       winner.value = currentPlayer.value;
+      winningLine.value = winLine;
+      keyMoves.value = identifyKeyMoves(moves.value, winner.value);
       status.value = 'finished';
       saveRecord();
       return true;
@@ -238,6 +362,8 @@ export const useGameStore = defineStore('game', () => {
 
     if (moves.value.length === BOARD_SIZE * BOARD_SIZE) {
       winner.value = 0;
+      winningLine.value = null;
+      keyMoves.value = identifyKeyMoves(moves.value, winner.value);
       status.value = 'finished';
       saveRecord();
       return true;
@@ -268,6 +394,8 @@ export const useGameStore = defineStore('game', () => {
       winner: winner.value,
       createdAt: new Date().toLocaleString('zh-CN'),
       duration: moves.value.length > 0 ? moves.value[moves.value.length - 1].timestamp - moves.value[0].timestamp : 0,
+      winningLine: winningLine.value,
+      keyMoves: keyMoves.value,
     };
     gameRecords.value.unshift(record);
   }
@@ -276,6 +404,8 @@ export const useGameStore = defineStore('game', () => {
     replayMoves.value = [...record.moves];
     replayIndex.value = 0;
     replayBoard.value = createEmptyBoard();
+    replayWinningLine.value = record.winningLine || null;
+    replayKeyMoves.value = record.keyMoves || [];
     status.value = 'replaying';
     isReplayPlaying.value = false;
   }
@@ -357,7 +487,8 @@ export const useGameStore = defineStore('game', () => {
 
   return {
     board, currentPlayer, moves, status, winner, gameRecords, aiConfig, isAiThinking,
-    replayMoves, replayIndex, replayBoard, isReplayPlaying, replaySpeed,
+    winningLine, keyMoves,
+    replayMoves, replayIndex, replayBoard, isReplayPlaying, replaySpeed, replayWinningLine, replayKeyMoves,
     currentMoveCount, isGameOver,
     startGame, placeStone, aiMove, saveRecord,
     startReplay, replayStepForward, replayStepBack, replayGoToStart, replayGoToEnd,

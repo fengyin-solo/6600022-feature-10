@@ -1,5 +1,7 @@
 <template>
   <div class="min-h-screen bg-gray-950 flex flex-col items-center p-4">
+    <ResultPanel v-if="showResultPanel" />
+
     <header class="w-full max-w-6xl mb-6">
       <h1 class="text-2xl font-bold text-green-400 text-center">棋类 AI 对弈与棋谱回放系统</h1>
       <p class="text-center text-gray-500 text-sm mt-1">五子棋 · Minimax + Alpha-Beta 剪枝</p>
@@ -120,6 +122,7 @@ import { computed } from 'vue';
 import { useGameStore } from './store/game';
 import GameBoard from './components/GameBoard.vue';
 import ReplayPanel from './components/ReplayPanel.vue';
+import ResultPanel from './components/ResultPanel.vue';
 
 const store = useGameStore();
 
@@ -131,5 +134,15 @@ const statusText = computed(() => {
     case 'replaying': return '回放中';
     default: return '';
   }
+});
+
+const showResultPanel = computed(() => {
+  if (store.status === 'finished') {
+    return store.winner !== null;
+  }
+  if (store.status === 'replaying') {
+    return store.replayIndex >= store.replayMoves.length && store.replayMoves.length > 0;
+  }
+  return false;
 });
 </script>

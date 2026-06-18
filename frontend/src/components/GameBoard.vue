@@ -28,6 +28,12 @@ const boardData = computed(() =>
 const movesList = computed(() =>
   store.status === 'replaying' ? store.replayMoves.slice(0, store.replayIndex) : store.moves
 );
+const winningLineData = computed(() => {
+  if (store.status === 'replaying') {
+    return store.replayIndex >= store.replayMoves.length ? store.replayWinningLine : null;
+  }
+  return store.winningLine;
+});
 
 function drawBoard(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = '#1a3a2a';
@@ -59,10 +65,20 @@ function drawBoard(ctx: CanvasRenderingContext2D) {
   }
 }
 
-function drawStone(ctx: CanvasRenderingContext2D, row: number, col: number, player: number, isLast: boolean) {
+function drawStone(ctx: CanvasRenderingContext2D, row: number, col: number, player: number, isLast: boolean, isWinning: boolean) {
   const x = PADDING + col * CELL_SIZE;
   const y = PADDING + row * CELL_SIZE;
   const radius = CELL_SIZE * 0.42;
+
+  if (isWinning) {
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+    ctx.fill();
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
 
   const gradient = ctx.createRadialGradient(x - 3, y - 3, 2, x, y, radius);
   if (player === 1) {
@@ -90,6 +106,25 @@ function drawStone(ctx: CanvasRenderingContext2D, row: number, col: number, play
   }
 }
 
+function drawWinningLine(ctx: CanvasRenderingContext2D, line: { row: number; col: number }[]) {
+  if (line.length < 2) return;
+
+  const start = line[0];
+  const end = line[line.length - 1];
+  const x1 = PADDING + start.col * CELL_SIZE;
+  const y1 = PADDING + start.row * CELL_SIZE;
+  const x2 = PADDING + end.col * CELL_SIZE;
+  const y2 = PADDING + end.row * CELL_SIZE;
+
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
+
 function render() {
   const canvas = canvasRef.value;
   if (!canvas) return;
@@ -101,14 +136,26 @@ function render() {
   const currentBoard = boardData.value;
   const currentMoves = movesList.value;
   const lastMove = currentMoves.length > 0 ? currentMoves[currentMoves.length - 1] : null;
+  const winLine = winningLineData.value;
+  const winSet = new Set<string>();
+  if (winLine) {
+    for (const pos of winLine) {
+      winSet.add(`${pos.row},${pos.col}`);
+    }
+  }
 
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       if (currentBoard[r][c] !== 0) {
         const isLast = lastMove !== null && lastMove.row === r && lastMove.col === c;
-        drawStone(ctx, r, c, currentBoard[r][c], isLast);
+        const isWinning = winSet.has(`${r},${c}`);
+        drawStone(ctx, r, c, currentBoard[r][c], isLast, isWinning);
       }
     }
+  }
+
+  if (winLine && winLine.length >= 2) {
+    drawWinningLine(ctx, winLine);
   }
 }
 
@@ -135,5 +182,5 @@ function handleClick(e: MouseEvent) {
 }
 
 onMounted(() => render());
-watch([boardData, () => store.replayIndex, () => store.status], () => render());
+watch([boardData, winningLineData, () => store.replayIndex, () => store.status], () => render());
 </script>
